@@ -25,9 +25,9 @@ public class MainActivity extends AppCompatActivity {
 
     public static final String LOG_TAG = "wysaid";
 
-    public static final String EFFECT_CONFIGS[] = {
+    public static final String EFFECT_CONFIGS[] = { // todo здесь все фильтры, а точнее их конфиги. Через пробел можно перечислить несколько фильтров (начинаются с "@") для одновременного наложения.
             "",
-            "@curve RGB(0,255)(255,0) @style cm mapping0.jpg 80 80 8 3", // ASCII art (字符画效果)
+            "@curve RGB(0,255)(255,0) @style cm mapping0.jpg 80 80 8 3", // ASCII art (字符画效果) // todo тут используются два фильтра – "@curve" и "@style"
             "@beautify face 1 480 640", //Beautify
             "@adjust lut edgy_amber.png",
             "@adjust lut filmstock.png",
@@ -41,6 +41,7 @@ public class MainActivity extends AppCompatActivity {
             "@dynamic wave 0.5",       //can adjust wave mix
             "#unpack @style sketch 0.9",
             "#unpack @krblend sr hehe.jpg 100 ",
+        //  "@blend sr [1,200,300] 100 ", // todo чтобы смешивать оригинальное видео с другим видео, можно задать правило таким образом. Описание здесь (блок "Note:"): https://github.com/wysaid/android-gpuimage-plus/wiki/Parsing-String-Rule-(EN)#21-normal-blend
             "#unpack @krblend ol hehe.jpg 100",
             "#unpack @krblend add hehe.jpg 100",
             "#unpack @krblend darken hehe.jpg 100",
@@ -141,7 +142,7 @@ public class MainActivity extends AppCompatActivity {
         //Notice: the 'name' passed in is just what you write in the rule, e.g: 1.jpg
         //注意， 这里回传的name不包含任何路径名， 仅为具体的图片文件名如 1.jpg
         @Override
-        public Bitmap loadImage(String name, Object arg) {
+        public Bitmap loadImage(String name, Object arg) { // todo через этот коллбек загружается изображение для фильтра (например, фильтра @blend)
 
             Log.i(Common.LOG_TAG, "Loading file: " + name);
             AssetManager am = getAssets();
@@ -184,12 +185,12 @@ public class MainActivity extends AppCompatActivity {
             new DemoClassDescription("ImageDeformActivity", "Image Deform Demo"),
             new DemoClassDescription("CameraDemoActivity", "Camera Filter Demo"),
             new DemoClassDescription("SimplePlayerDemoActivity", "Simple Player Demo"),
-            new DemoClassDescription("VideoPlayerDemoActivity", "Video Player Demo"),
+            new DemoClassDescription("VideoPlayerDemoActivity", "Video Player Demo"), // todo все перечисленные фильтры смотрим в VideoPlayerDemoActivity
             new DemoClassDescription("FaceTrackingDemoActivity", "Face Tracking Demo"),
             new DemoClassDescription("TestCaseActivity", "Test Cases")
     };
 
-    public class DemoButton extends Button implements View.OnClickListener {
+    public class DemoButton extends android.support.v7.widget.AppCompatButton implements View.OnClickListener {
         private DemoClassDescription mDemo;
 
         public void setDemo(DemoClassDescription demo) {

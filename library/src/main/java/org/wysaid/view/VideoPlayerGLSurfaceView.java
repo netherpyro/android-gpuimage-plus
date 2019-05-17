@@ -141,7 +141,7 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
             public void run() {
 
                 if (mFrameRenderer != null) {
-                    mFrameRenderer.setFilterWidthConfig(config);
+                    mFrameRenderer.setFilterWidthConfig(config); // todo вызывается при выборе одного из фильтров
                 } else {
                     Log.e(LOG_TAG, "setFilterWithConfig after release!!");
                 }
@@ -154,7 +154,7 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
             @Override
             public void run() {
                 if (mFrameRenderer != null) {
-                    mFrameRenderer.setFilterIntensity(intensity);
+                    mFrameRenderer.setFilterIntensity(intensity); // todo вызывается при изменении интенсивности фильтра
                 } else {
                     Log.e(LOG_TAG, "setFilterIntensity after release!!");
                 }

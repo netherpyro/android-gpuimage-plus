@@ -25,7 +25,7 @@ import org.wysaid.view.VideoPlayerGLSurfaceView;
 
 public class VideoPlayerDemoActivity extends AppCompatActivity {
 
-    VideoPlayerGLSurfaceView mPlayerView;
+    VideoPlayerGLSurfaceView mPlayerView; // todo gl video player
     Button mShapeBtn;
     Button mTakeshotBtn;
     Button mGalleryBtn;
@@ -167,7 +167,7 @@ public class VideoPlayerDemoActivity extends AppCompatActivity {
         }
 
         String[] filePaths = {
-                "android.resource://" + getPackageName() + "/" + R.raw.test,
+                "android.resource://" + getPackageName() + "/" + R.raw.test, // todo тестовое видео на которое накладываются фильтры
                 "http://wge.wysaid.org/res/video/1.mp4",
                 "http://wysaid.org/p/test.mp4",
         };
