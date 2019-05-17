@@ -80,7 +80,7 @@ public class CGEFrameRenderer {
     }
 
     //initialize the filters width config string
-    public void setFilterWidthConfig(final String config) {
+    public void setFilterWithConfig(final String config) {
         if(mNativeAddress != 0)
             nativeSetFilterWithConfig(mNativeAddress, config);
     }

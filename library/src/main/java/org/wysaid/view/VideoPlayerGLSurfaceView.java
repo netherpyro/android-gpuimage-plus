@@ -27,14 +27,14 @@ import javax.microedition.khronos.opengles.GL10;
  * Created by wangyang on 15/11/26.
  */
 
-public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurfaceView.Renderer, SurfaceTexture.OnFrameAvailableListener {
+public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurfaceView.Renderer, SurfaceTexture.OnFrameAvailableListener, ExtractMpegFrames.OnTextureAvailableListener {
 
     public static final String LOG_TAG = Common.LOG_TAG;
 
     private SurfaceTexture mSurfaceTexture;
     private int mVideoTextureID;
     private CGEFrameRenderer mFrameRenderer;
-
+    private ExtractMpegFrames extractMpegFrames = new ExtractMpegFrames();
 
     private TextureRenderer.Viewport mRenderViewport = new TextureRenderer.Viewport();
     private float[] mTransformMatrix = new float[16];
@@ -71,6 +71,14 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
     private MediaPlayer mPlayer;
 
     private Uri mVideoUri;
+
+    private String blendConfig = null;
+
+    @Override
+    public void onTextureId(int textureId) {
+        Log.d(LOG_TAG, "onTextureId::" + textureId + ", videoTextureId: " + mVideoTextureID);
+        blendConfig = "@blend sr [" + textureId + "," + mVideoWidth + "," + mVideoHeight + "] 100";
+    }
 
     public interface PlayerInitializeCallback {
 
@@ -141,7 +149,11 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
             public void run() {
 
                 if (mFrameRenderer != null) {
-                    mFrameRenderer.setFilterWidthConfig(config); // todo вызывается при выборе одного из фильтров
+                    String applyConfig = blendConfig != null ? blendConfig : config;
+
+                    Log.d(LOG_TAG, "use filter config: " + applyConfig);
+
+                    mFrameRenderer.setFilterWithConfig(applyConfig); // todo вызывается при выборе одного из фильтров
                 } else {
                     Log.e(LOG_TAG, "setFilterWithConfig after release!!");
                 }
@@ -504,6 +516,12 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
                     mPreparedCallback.playPrepared(mPlayer);
                 } else {
                     mp.start();
+                }
+
+                try {
+                    extractMpegFrames.testExtractMpegFrames(VideoPlayerGLSurfaceView.this);
+                } catch (Throwable throwable) {
+                    Log.e(LOG_TAG, "testExtractMpegFrames failed!", throwable);
                 }
 
                 Log.i(LOG_TAG, String.format("Video resolution 1: %d x %d", mVideoWidth, mVideoHeight));

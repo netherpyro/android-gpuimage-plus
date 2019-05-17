@@ -21,7 +21,6 @@ import org.wysaid.camera.CameraInstance;
 import org.wysaid.common.Common;
 import org.wysaid.common.FrameBufferObject;
 import org.wysaid.nativePort.CGEFrameRecorder;
-import org.wysaid.nativePort.CGEFrameRenderer;
 import org.wysaid.nativePort.CGENativeLibrary;
 
 import java.io.BufferedOutputStream;
@@ -53,7 +52,7 @@ public class CameraGLSurfaceViewWithTexture extends CameraGLSurfaceView implemen
             public void run() {
 
                 if (mFrameRecorder != null) {
-                    mFrameRecorder.setFilterWidthConfig(config);
+                    mFrameRecorder.setFilterWithConfig(config);
                 } else {
                     Log.e(LOG_TAG, "setFilterWithConfig after release!!");
                 }
