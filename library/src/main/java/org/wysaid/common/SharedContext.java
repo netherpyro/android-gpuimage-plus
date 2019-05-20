@@ -2,6 +2,7 @@ package org.wysaid.common;
 
 import android.annotation.SuppressLint;
 import android.opengl.EGL14;
+import android.support.annotation.Nullable;
 import android.util.Log;
 
 import javax.microedition.khronos.egl.EGL10;
@@ -38,15 +39,19 @@ public class SharedContext {
     }
 
     public static SharedContext create() {
-        return create(EGL10.EGL_NO_CONTEXT, 64, 64, EGL10.EGL_PBUFFER_BIT, null);
+        return create(EGL10.EGL_NO_CONTEXT, 64, 64, EGL10.EGL_PBUFFER_BIT, null, null, null, null);
+    }
+
+    public static SharedContext create(EGL10 egl10, EGLDisplay display, EGLConfig config) {
+        return create(EGL10.EGL_NO_CONTEXT, 64, 64, EGL10.EGL_PBUFFER_BIT, null, egl10, display, config);
     }
 
     public static SharedContext create(int width, int height) {
-        return create(EGL10.EGL_NO_CONTEXT, width, height, EGL10.EGL_PBUFFER_BIT, null);
+        return create(EGL10.EGL_NO_CONTEXT, width, height, EGL10.EGL_PBUFFER_BIT, null, null, null, null);
     }
 
     public static SharedContext create(EGLContext context, int width, int height) {
-        return create(context, width, height, EGL10.EGL_PBUFFER_BIT, null);
+        return create(context, width, height, EGL10.EGL_PBUFFER_BIT, null, null, null, null);
     }
 
     //contextType: EGL10.EGL_PBUFFER_BIT
@@ -54,9 +59,11 @@ public class SharedContext {
     //             EGL10.EGL_PIXMAP_BIT
     //             EGL_RECORDABLE_ANDROID ( = 0x3142 )
     //             etc.
-    public static SharedContext create(EGLContext context, int width, int height, int contextType, Object obj) {
+    public static SharedContext create(EGLContext context, int width, int height, int contextType, Object obj, @Nullable EGL10 egl, @Nullable EGLDisplay display, @Nullable EGLConfig eglConfig) {
 
         SharedContext sharedContext = new SharedContext();
+        sharedContext.mConfig = eglConfig;
+
         if(!sharedContext.initEGL(context, width, height, contextType, obj)) {
             sharedContext.release();
             sharedContext = null;
@@ -156,7 +163,9 @@ public class SharedContext {
 
         Log.i(LOG_TAG, String.format("Config num: %d, has sharedContext: %s", numConfig[0], context == EGL10.EGL_NO_CONTEXT ? "NO" : "YES"));
 
-        mConfig = configs[0];
+        if (mConfig == null) {
+            mConfig = configs[0];
+        }
 
         mContext = mEgl.eglCreateContext(mDisplay, mConfig,
                 context, contextAttribList);

@@ -15,21 +15,27 @@ import android.util.Log;
 import android.view.Surface;
 
 import org.wysaid.common.Common;
+import org.wysaid.common.SharedContext;
 import org.wysaid.nativePort.CGEFrameRenderer;
 import org.wysaid.texUtils.TextureRenderer;
 
 import java.nio.IntBuffer;
 
+import javax.microedition.khronos.egl.EGL10;
 import javax.microedition.khronos.egl.EGLConfig;
+import javax.microedition.khronos.egl.EGLContext;
+import javax.microedition.khronos.egl.EGLDisplay;
 import javax.microedition.khronos.opengles.GL10;
 
 /**
  * Created by wangyang on 15/11/26.
  */
 
-public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurfaceView.Renderer, SurfaceTexture.OnFrameAvailableListener, ExtractMpegFrames.OnTextureAvailableListener {
+public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurfaceView.Renderer, SurfaceTexture.OnFrameAvailableListener, ExtractMpegFrames.OnTextureAvailableListener, GLSurfaceView.EGLContextFactory {
 
     public static final String LOG_TAG = Common.LOG_TAG;
+
+    private SharedContext sharedContext;
 
     private SurfaceTexture mSurfaceTexture;
     private int mVideoTextureID;
@@ -73,11 +79,25 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
     private Uri mVideoUri;
 
     private String blendConfig = null;
+    private int blendVideoTexId = -1;
 
     @Override
     public void onTextureId(int textureId) {
         Log.d(LOG_TAG, "onTextureId::" + textureId + ", videoTextureId: " + mVideoTextureID);
-        blendConfig = "@blend sr [" + textureId + "," + mVideoWidth + "," + mVideoHeight + "] 100";
+        blendVideoTexId = textureId;
+    }
+
+    @Override
+    public EGLContext createContext(EGL10 egl, EGLDisplay display, EGLConfig eglConfig) {
+        Log.d(LOG_TAG, "createContext::");
+        sharedContext = SharedContext.create(egl, display, eglConfig);
+
+        return sharedContext.getContext();
+    }
+
+    @Override
+    public void destroyContext(EGL10 egl, EGLDisplay display, EGLContext context) {
+        sharedContext.release();
     }
 
     public interface PlayerInitializeCallback {
@@ -153,7 +173,7 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
 
                     Log.d(LOG_TAG, "use filter config: " + applyConfig);
 
-                    mFrameRenderer.setFilterWithConfig(applyConfig); // todo вызывается при выборе одного из фильтров
+                    mFrameRenderer.setFilterWithConfig(applyConfig);
                 } else {
                     Log.e(LOG_TAG, "setFilterWithConfig after release!!");
                 }
@@ -166,7 +186,7 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
             @Override
             public void run() {
                 if (mFrameRenderer != null) {
-                    mFrameRenderer.setFilterIntensity(intensity); // todo вызывается при изменении интенсивности фильтра
+                    mFrameRenderer.setFilterIntensity(intensity);
                 } else {
                     Log.e(LOG_TAG, "setFilterIntensity after release!!");
                 }
@@ -255,6 +275,7 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
 
         Log.i(LOG_TAG, "MyGLSurfaceView Construct...");
 
+        setEGLContextFactory(this);
         setEGLContextClientVersion(2);
         setEGLConfigChooser(8, 8, 8, 8, 8, 0);
         getHolder().setFormat(PixelFormat.RGBA_8888);
@@ -281,6 +302,7 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
             mVideoTextureID = Common.genSurfaceTextureID();
             mSurfaceTexture = new SurfaceTexture(mVideoTextureID);
             mSurfaceTexture.setOnFrameAvailableListener(VideoPlayerGLSurfaceView.this);
+            extractMpegFrames.prepare(this);
             _useUri();
         }
     }
@@ -508,6 +530,10 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
                             Log.e(LOG_TAG, "Frame Recorder init failed!");
                         }
 
+                        if (blendVideoTexId != 0) {
+                            blendConfig = "@blend sr [" + blendVideoTexId + "," + mVideoWidth + "," + mVideoHeight + "] 100";
+                        }
+
                         calcViewport();
                     }
                 });
@@ -519,7 +545,7 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
                 }
 
                 try {
-                    extractMpegFrames.testExtractMpegFrames(VideoPlayerGLSurfaceView.this);
+                    extractMpegFrames.testExtractMpegFrames();
                 } catch (Throwable throwable) {
                     Log.e(LOG_TAG, "testExtractMpegFrames failed!", throwable);
                 }

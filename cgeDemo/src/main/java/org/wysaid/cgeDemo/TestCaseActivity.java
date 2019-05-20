@@ -96,7 +96,7 @@ public class TestCaseActivity extends AppCompatActivity {
 
                 //bmp is used for watermark, (just pass null if you don't want that)
                 //and ususally the blend mode is CGE_BLEND_ADDREV for watermarks.
-                CGEFFmpegNativeLibrary.generateVideoWithFilter(outputFilename, inputFileName, "@adjust lut late_sunset.png", 1.0f, bmp, CGENativeLibrary.TextureBlendMode.CGE_BLEND_ADDREV, 1.0f, false); // todo срендерит видос с фильтрами
+                CGEFFmpegNativeLibrary.generateVideoWithFilter(outputFilename, inputFileName, "@adjust lut late_sunset.png", 1.0f, bmp, CGENativeLibrary.TextureBlendMode.CGE_BLEND_ADDREV, 1.0f, false);
 
                 showMsg("Done! The file is generated at: " + outputFilename);
                 Log.i(LOG_TAG, "Done! The file is generated at: " + outputFilename);
