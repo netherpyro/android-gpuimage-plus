@@ -18,11 +18,6 @@ import android.graphics.SurfaceTexture;
 import android.media.MediaCodec;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
-import android.opengl.EGL14;
-import android.opengl.EGLConfig;
-import android.opengl.EGLContext;
-import android.opengl.EGLDisplay;
-import android.opengl.EGLSurface;
 import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
 import android.opengl.Matrix;
@@ -39,6 +34,8 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
+
+import javax.microedition.khronos.egl.EGLContext;
 
 /**
  * Extract frames from an MP4 using MediaExtractor, MediaCodec, and GLES.  Put a .mp4 file
@@ -57,22 +54,22 @@ public class ExtractMpegFrames {
     private static final File FILES_DIR = Environment.getExternalStorageDirectory();
     private static final String INPUT_FILE = "source.mp4";
 
-    private OnTextureAvailableListener textureAvailableListener;
     private MediaCodec decoder;
     private CodecOutputSurface outputSurface;
     private MediaExtractor extractor;
     private MediaFormat format;
-    int trackIndex;
+    private int trackIndex;
+    private EGLContext rootContext;
 
     /** test entry point */
     void testExtractMpegFrames() throws Throwable {
         ExtractMpegFramesWrapper.runTest(this);
     }
 
-    void prepare(@Nullable OnTextureAvailableListener listener) {
+    void prepare(@Nullable OnTextureAvailableListener listener, EGLContext rootContext) {
         int saveWidth = 640;
         int saveHeight = 480;
-        this.textureAvailableListener = listener;
+        this.rootContext = rootContext;
 
         try {
             File inputFile = new File(FILES_DIR, INPUT_FILE);   // must be an absolute path
@@ -104,8 +101,8 @@ public class ExtractMpegFrames {
             }
             outputSurface = new CodecOutputSurface(saveWidth, saveHeight, rotation);
 
-            if (textureAvailableListener != null) {
-                textureAvailableListener.onTextureId(outputSurface.getTextureId());
+            if (listener != null) {
+                listener.onTextureId(outputSurface.getTextureId());
             }
         } catch (IOException e) {
             Log.e(TAG, "failed prepare", e);
@@ -287,8 +284,15 @@ public class ExtractMpegFrames {
                 decoder.releaseOutputBuffer(decoderStatus, doRender);
                 if (doRender) {
                     if (VERBOSE) Log.d(TAG, "awaiting decode of frame " + decodeCount);
+                    outputSurface.makeCurrent();
                     outputSurface.awaitNewImage();
                     outputSurface.drawImage();
+
+                    try {
+                        Thread.sleep(200L);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
                     decodeCount++;
                 }
             }
@@ -311,10 +315,7 @@ public class ExtractMpegFrames {
         private ExtractMpegFrames.STextureRender mTextureRender;
         private SurfaceTexture mSurfaceTexture;
         private Surface mSurface;
-
-        private EGLDisplay mEGLDisplay = EGL14.EGL_NO_DISPLAY;
-        private EGLContext mEGLContext = EGL14.EGL_NO_CONTEXT;
-        private EGLSurface mEGLSurface = EGL14.EGL_NO_SURFACE;
+        private SharedContext localSharedContext;
         int mWidth;
         int mHeight;
 
@@ -335,8 +336,8 @@ public class ExtractMpegFrames {
             mHeight = height;
             mRotation = rotation;
 
-            //eglSetup();
-            //makeCurrent();
+            eglSetup();
+            makeCurrent();
             setup();
         }
 
@@ -374,55 +375,10 @@ public class ExtractMpegFrames {
          * Prepares EGL.  We want a GLES 2.0 context and a surface that supports pbuffer.
          */
         private void eglSetup() {
-            mEGLDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
-            if (mEGLDisplay == EGL14.EGL_NO_DISPLAY) {
-                throw new RuntimeException("unable to get EGL14 display");
-            }
-            int[] version = new int[2];
-            if (!EGL14.eglInitialize(mEGLDisplay, version, 0, version, 1)) {
-                mEGLDisplay = null;
-                throw new RuntimeException("unable to initialize EGL14");
-            }
+            localSharedContext = SharedContext.create(rootContext, mWidth, mHeight);
 
-            // Configure EGL for pbuffer and OpenGL ES 2.0, 24-bit RGB.
-            int[] attribList = {
-                    EGL14.EGL_RED_SIZE, 8,
-                    EGL14.EGL_GREEN_SIZE, 8,
-                    EGL14.EGL_BLUE_SIZE, 8,
-                    EGL14.EGL_ALPHA_SIZE, 8,
-                    EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
-                    EGL14.EGL_SURFACE_TYPE, EGL14.EGL_PBUFFER_BIT,
-                    EGL14.EGL_NONE
-            };
-            EGLConfig[] configs = new EGLConfig[1];
-            int[] numConfigs = new int[1];
-            if (!EGL14.eglChooseConfig(mEGLDisplay, attribList, 0, configs, 0, configs.length,
-                    numConfigs, 0)) {
-                throw new RuntimeException("unable to find RGB888+recordable ES2 EGL config");
-            }
-
-            // Configure context for OpenGL ES 2.0.
-            int[] attrib_list = {
-                    EGL14.EGL_CONTEXT_CLIENT_VERSION, 2,
-                    EGL14.EGL_NONE
-            };
-            mEGLContext = EGL14.eglCreateContext(mEGLDisplay, configs[0], EGL14.EGL_NO_CONTEXT,
-                    attrib_list, 0);
-            checkEglError("eglCreateContext");
-            if (mEGLContext == null) {
-                throw new RuntimeException("null context");
-            }
-
-            // Create a pbuffer surface.
-            int[] surfaceAttribs = {
-                    EGL14.EGL_WIDTH, mWidth,
-                    EGL14.EGL_HEIGHT, mHeight,
-                    EGL14.EGL_NONE
-            };
-            mEGLSurface = EGL14.eglCreatePbufferSurface(mEGLDisplay, configs[0], surfaceAttribs, 0);
-            checkEglError("eglCreatePbufferSurface");
-            if (mEGLSurface == null) {
-                throw new RuntimeException("surface was null");
+            if (localSharedContext  == null) {
+                throw new RuntimeException("null local context");
             }
         }
 
@@ -430,16 +386,7 @@ public class ExtractMpegFrames {
          * Discard all resources held by this class, notably the EGL context.
          */
         public void release() {
-            if (mEGLDisplay != EGL14.EGL_NO_DISPLAY) {
-                EGL14.eglDestroySurface(mEGLDisplay, mEGLSurface);
-                EGL14.eglDestroyContext(mEGLDisplay, mEGLContext);
-                EGL14.eglReleaseThread();
-                EGL14.eglTerminate(mEGLDisplay);
-            }
-            mEGLDisplay = EGL14.EGL_NO_DISPLAY;
-            mEGLContext = EGL14.EGL_NO_CONTEXT;
-            mEGLSurface = EGL14.EGL_NO_SURFACE;
-
+            localSharedContext.release();
             mSurface.release();
 
             // this causes a bunch of warnings that appear harmless but might confuse someone:
@@ -454,10 +401,12 @@ public class ExtractMpegFrames {
         /**
          * Makes our EGL context and surface current.
          */
-        public void makeCurrent() {
-            if (!EGL14.eglMakeCurrent(mEGLDisplay, mEGLSurface, mEGLSurface, mEGLContext)) {
-                throw new RuntimeException("eglMakeCurrent failed");
-            }
+        void makeCurrent() {
+            localSharedContext.makeCurrent();
+        }
+
+        void makeNoCurrent() {
+            localSharedContext.makeNotCurrent();
         }
 
         /**
@@ -515,16 +464,6 @@ public class ExtractMpegFrames {
                 }
                 mFrameAvailable = true;
                 mFrameSyncObject.notifyAll();
-            }
-        }
-
-        /**
-         * Checks for EGL errors.
-         */
-        private void checkEglError(String msg) {
-            int error;
-            if ((error = EGL14.eglGetError()) != EGL14.EGL_SUCCESS) {
-                throw new RuntimeException(msg + ": EGL error: 0x" + Integer.toHexString(error));
             }
         }
     }

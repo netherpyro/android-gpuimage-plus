@@ -39,19 +39,25 @@ public class SharedContext {
     }
 
     public static SharedContext create() {
-        return create(EGL10.EGL_NO_CONTEXT, 64, 64, EGL10.EGL_PBUFFER_BIT, null, null, null, null);
+        return create(EGL10.EGL_NO_CONTEXT, 64, 64, EGL10.EGL_PBUFFER_BIT, null, null);
     }
 
-    public static SharedContext create(EGL10 egl10, EGLDisplay display, EGLConfig config) {
-        return create(EGL10.EGL_NO_CONTEXT, 64, 64, EGL10.EGL_PBUFFER_BIT, null, egl10, display, config);
+    /**
+     * Create for window
+     */
+    public static SharedContext create(EGLConfig config, Object obj) {
+        return create(EGL10.EGL_NO_CONTEXT, 0, 0, EGL10.EGL_WINDOW_BIT, obj, config);
     }
 
     public static SharedContext create(int width, int height) {
-        return create(EGL10.EGL_NO_CONTEXT, width, height, EGL10.EGL_PBUFFER_BIT, null, null, null, null);
+        return create(EGL10.EGL_NO_CONTEXT, width, height, EGL10.EGL_PBUFFER_BIT, null, null);
     }
 
+    /**
+     * Create off-screen
+     */
     public static SharedContext create(EGLContext context, int width, int height) {
-        return create(context, width, height, EGL10.EGL_PBUFFER_BIT, null, null, null, null);
+        return create(context, width, height, EGL10.EGL_PBUFFER_BIT, null, null);
     }
 
     //contextType: EGL10.EGL_PBUFFER_BIT
@@ -59,7 +65,7 @@ public class SharedContext {
     //             EGL10.EGL_PIXMAP_BIT
     //             EGL_RECORDABLE_ANDROID ( = 0x3142 )
     //             etc.
-    public static SharedContext create(EGLContext context, int width, int height, int contextType, Object obj, @Nullable EGL10 egl, @Nullable EGLDisplay display, @Nullable EGLConfig eglConfig) {
+    public static SharedContext create(EGLContext context, int width, int height, int contextType, Object obj, @Nullable EGLConfig eglConfig) {
 
         SharedContext sharedContext = new SharedContext();
         sharedContext.mConfig = eglConfig;
@@ -108,13 +114,22 @@ public class SharedContext {
     }
 
     public void makeCurrent() {
+        Log.d(LOG_TAG, "makeCurrent::thread: " + Thread.currentThread().getName());
+
         if(!mEgl.eglMakeCurrent(mDisplay, mSurface, mSurface, mContext)) {
             Log.e(LOG_TAG, "eglMakeCurrent failed:" + mEgl.eglGetError());
         }
     }
 
-    public boolean swapBuffers() {
-        return mEgl.eglSwapBuffers(mDisplay, mSurface);
+    public void makeNotCurrent() {
+        Log.d(LOG_TAG, "makeNotCurrent::thread: " + Thread.currentThread().getName());
+        mEgl.eglMakeCurrent(mDisplay, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_CONTEXT);
+    }
+
+    public void swapBuffers() {
+        if (!mEgl.eglSwapBuffers(mDisplay, mSurface)) {
+            Log.e(LOG_TAG, "swapBuffers() failed" + mEgl.eglGetError());
+        }
     }
 
     private boolean initEGL(EGLContext context, int width, int height, int contextType, Object obj) {
@@ -136,7 +151,7 @@ public class SharedContext {
         int[] numConfig = new int[1];
         int[] version = new int[2];
 
-        int surfaceAttribList[] = {
+        int[] surfaceAttribList = {
                 EGL10.EGL_WIDTH, width,
                 EGL10.EGL_HEIGHT, height,
                 EGL10.EGL_NONE
@@ -179,7 +194,7 @@ public class SharedContext {
                 mSurface = mEgl.eglCreatePixmapSurface(mDisplay, mConfig, obj, surfaceAttribList);
                 break;
             case EGL10.EGL_WINDOW_BIT:
-                mSurface = mEgl.eglCreateWindowSurface(mDisplay, mConfig, obj, surfaceAttribList);
+                mSurface = mEgl.eglCreateWindowSurface(mDisplay, mConfig, obj, null);
                 break;
             case EGL10.EGL_PBUFFER_BIT:
             case EGL_RECORDABLE_ANDROID:

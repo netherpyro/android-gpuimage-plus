@@ -25,17 +25,20 @@ import javax.microedition.khronos.egl.EGL10;
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.egl.EGLContext;
 import javax.microedition.khronos.egl.EGLDisplay;
+import javax.microedition.khronos.egl.EGLSurface;
 import javax.microedition.khronos.opengles.GL10;
 
 /**
  * Created by wangyang on 15/11/26.
  */
 
-public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurfaceView.Renderer, SurfaceTexture.OnFrameAvailableListener, ExtractMpegFrames.OnTextureAvailableListener, GLSurfaceView.EGLContextFactory {
+public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurfaceView.Renderer,
+        SurfaceTexture.OnFrameAvailableListener, ExtractMpegFrames.OnTextureAvailableListener,
+        GLSurfaceView.EGLContextFactory, GLSurfaceView.EGLWindowSurfaceFactory {
 
     public static final String LOG_TAG = Common.LOG_TAG;
 
-    private SharedContext sharedContext;
+    private SharedContext rootSharedContext;
 
     private SurfaceTexture mSurfaceTexture;
     private int mVideoTextureID;
@@ -83,21 +86,31 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
 
     @Override
     public void onTextureId(int textureId) {
-        Log.d(LOG_TAG, "onTextureId::" + textureId + ", videoTextureId: " + mVideoTextureID);
+        Log.d(LOG_TAG, "onTextureId::blended textureId: " + textureId + ", original textureId: " + mVideoTextureID);
         blendVideoTexId = textureId;
     }
 
     @Override
     public EGLContext createContext(EGL10 egl, EGLDisplay display, EGLConfig eglConfig) {
-        Log.d(LOG_TAG, "createContext::");
-        sharedContext = SharedContext.create(egl, display, eglConfig);
+        Log.d(LOG_TAG, "createContext::for window");
+        rootSharedContext = SharedContext.create(eglConfig, getHolder());
 
-        return sharedContext.getContext();
+        return rootSharedContext.getContext();
     }
 
     @Override
     public void destroyContext(EGL10 egl, EGLDisplay display, EGLContext context) {
-        sharedContext.release();
+        rootSharedContext.release();
+    }
+
+    @Override
+    public EGLSurface createWindowSurface(EGL10 egl, EGLDisplay display, EGLConfig config, Object nativeWindow) {
+        return rootSharedContext.getSurface();
+    }
+
+    @Override
+    public void destroySurface(EGL10 egl, EGLDisplay display, EGLSurface surface) {
+        rootSharedContext.release();
     }
 
     public interface PlayerInitializeCallback {
@@ -276,6 +289,7 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
         Log.i(LOG_TAG, "MyGLSurfaceView Construct...");
 
         setEGLContextFactory(this);
+        setEGLWindowSurfaceFactory(this);
         setEGLContextClientVersion(2);
         setEGLConfigChooser(8, 8, 8, 8, 8, 0);
         getHolder().setFormat(PixelFormat.RGBA_8888);
@@ -302,7 +316,7 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
             mVideoTextureID = Common.genSurfaceTextureID();
             mSurfaceTexture = new SurfaceTexture(mVideoTextureID);
             mSurfaceTexture.setOnFrameAvailableListener(VideoPlayerGLSurfaceView.this);
-            extractMpegFrames.prepare(this);
+           extractMpegFrames.prepare(this, rootSharedContext.getContext());
             _useUri();
         }
     }
@@ -372,6 +386,7 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
 
     @Override
     public void onDrawFrame(GL10 gl) {
+        rootSharedContext.makeCurrent();
 
         if (mSurfaceTexture == null || mFrameRenderer == null) {
             return;
@@ -530,7 +545,7 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
                             Log.e(LOG_TAG, "Frame Recorder init failed!");
                         }
 
-                        if (blendVideoTexId != 0) {
+                        if (blendVideoTexId != -1) {
                             blendConfig = "@blend sr [" + blendVideoTexId + "," + mVideoWidth + "," + mVideoHeight + "] 100";
                         }
 
