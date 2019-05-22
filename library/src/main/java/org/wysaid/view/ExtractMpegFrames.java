@@ -61,15 +61,20 @@ public class ExtractMpegFrames {
     private int trackIndex;
     private EGLContext rootContext;
 
+    private int saveWidth = 640;
+    private int saveHeight = 480;
+    private int rotation = 0;
+
+    private int mBlendTextureId;
+
     /** test entry point */
     void testExtractMpegFrames() throws Throwable {
         ExtractMpegFramesWrapper.runTest(this);
     }
 
-    void prepare(@Nullable OnTextureAvailableListener listener, EGLContext rootContext) {
-        int saveWidth = 640;
-        int saveHeight = 480;
+    void prepare(EGLContext rootContext, int blendTextureId) {
         this.rootContext = rootContext;
+        this.mBlendTextureId = blendTextureId;
 
         try {
             File inputFile = new File(FILES_DIR, INPUT_FILE);   // must be an absolute path
@@ -95,22 +100,13 @@ public class ExtractMpegFrames {
 
             // Could use width/height from the MediaFormat to get full-size frames.
             final String KEY_ROTATION = "rotation-degrees";
-            int rotation = 0;
+
             if (format.containsKey(KEY_ROTATION)) {
                 rotation = format.getInteger(KEY_ROTATION);
-            }
-            outputSurface = new CodecOutputSurface(saveWidth, saveHeight, rotation);
-
-            if (listener != null) {
-                listener.onTextureId(outputSurface.getTextureId());
             }
         } catch (IOException e) {
             Log.e(TAG, "failed prepare", e);
         }
-    }
-
-    public interface OnTextureAvailableListener {
-        void onTextureId(int textureId);
     }
 
     /**
@@ -142,7 +138,6 @@ public class ExtractMpegFrames {
             ExtractMpegFramesWrapper wrapper = new ExtractMpegFramesWrapper(obj);
             Thread th = new Thread(wrapper, "codec test");
             th.start();
-           // th.join();
             if (wrapper.mThrowable != null) {
                 throw wrapper.mThrowable;
             }
@@ -158,6 +153,8 @@ public class ExtractMpegFrames {
      * you're extracting frames you don't want black bars.
      */
     private void extractMpegFrames() throws IOException {
+        outputSurface = new CodecOutputSurface(saveWidth, saveHeight, rotation);
+
         // Create a MediaCodec decoder, and configure it with the MediaFormat from the
         // extractor.  It's very important to use the format from the extractor because
         // it contains a copy of the CSD-0/CSD-1 codec-specific data chunks.
@@ -284,12 +281,11 @@ public class ExtractMpegFrames {
                 decoder.releaseOutputBuffer(decoderStatus, doRender);
                 if (doRender) {
                     if (VERBOSE) Log.d(TAG, "awaiting decode of frame " + decodeCount);
-                    outputSurface.makeCurrent();
                     outputSurface.awaitNewImage();
-                    outputSurface.drawImage();
+                    //outputSurface.drawImage();
 
                     try {
-                        Thread.sleep(200L);
+                        Thread.sleep(100L);
                     } catch (InterruptedException e) {
                         e.printStackTrace();
                     }
@@ -312,7 +308,7 @@ public class ExtractMpegFrames {
      */
     private class CodecOutputSurface implements SurfaceTexture.OnFrameAvailableListener {
 
-        private ExtractMpegFrames.STextureRender mTextureRender;
+        //private ExtractMpegFrames.STextureRender mTextureRender;
         private SurfaceTexture mSurfaceTexture;
         private Surface mSurface;
         private SharedContext localSharedContext;
@@ -337,23 +333,23 @@ public class ExtractMpegFrames {
             mRotation = rotation;
 
             eglSetup();
-            makeCurrent();
+           // makeCurrent();
             setup();
         }
 
-        public int getTextureId() {
+        /*public int getTextureId() {
             return mTextureRender.mTextureID;
-        }
+        }*/
 
         /**
          * Creates interconnected instances of TextureRender, SurfaceTexture, and Surface.
          */
         private void setup() {
-            mTextureRender = new ExtractMpegFrames.STextureRender();
-            mTextureRender.surfaceCreated();
+            //mTextureRender = new ExtractMpegFrames.STextureRender();
+            //mTextureRender.surfaceCreated();
 
-            if (VERBOSE) Log.d(TAG, "textureID=" + mTextureRender.mTextureID);
-            mSurfaceTexture = new SurfaceTexture(mTextureRender.mTextureID);
+            if (VERBOSE) Log.d(TAG, "textureID=" + mBlendTextureId);
+            mSurfaceTexture = new SurfaceTexture(mBlendTextureId);
 
             // This doesn't work if this object is created on the thread that CTS started for
             // these test cases.
@@ -393,7 +389,7 @@ public class ExtractMpegFrames {
             //  W BufferQueue: [unnamed-3997-2] cancelBuffer: BufferQueue has been abandoned!
             //mSurfaceTexture.release();
 
-            mTextureRender = null;
+            //mTextureRender = null;
             mSurface = null;
             mSurfaceTexture = null;
         }
@@ -403,10 +399,6 @@ public class ExtractMpegFrames {
          */
         void makeCurrent() {
             localSharedContext.makeCurrent();
-        }
-
-        void makeNoCurrent() {
-            localSharedContext.makeNotCurrent();
         }
 
         /**
@@ -443,16 +435,18 @@ public class ExtractMpegFrames {
             }
 
             // Latch the data.
-            mTextureRender.checkGlError("before updateTexImage");
+            //mTextureRender.checkGlError("before updateTexImage");
+
+            if (VERBOSE) Log.d(TAG, "awaitNewImage::updating tex image");
             mSurfaceTexture.updateTexImage();
         }
 
         /**
          * Draws the data from SurfaceTexture onto the current EGL surface.
          */
-        public void drawImage() {
+        /*public void drawImage() {
             mTextureRender.drawFrame(mSurfaceTexture, mRotation);
-        }
+        }*/
 
         // SurfaceTexture callback
         @Override
