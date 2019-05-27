@@ -7,6 +7,7 @@ import android.opengl.GLUtils;
 import android.util.Log;
 
 import java.nio.FloatBuffer;
+import java.nio.IntBuffer;
 
 /**
  * Created by wangyang on 15/7/27.
@@ -17,25 +18,30 @@ public class Common {
     public static final boolean DEBUG = true;
     public static final String LOG_TAG = "libCGE_java";
     public static final float[] FULLSCREEN_VERTICES = {-1.0f, -1.0f, 1.0f, -1.0f, 1.0f, 1.0f, -1.0f, 1.0f};
+    public static final int NO_TEXTURE = -1;
 
     public static void checkGLError(final String tag) {
         int loopCnt = 0;
-        for(int err = GLES20.glGetError(); loopCnt < 32 && err != GLES20.GL_FALSE; err = GLES20.glGetError(), ++loopCnt)
-        {
+        for (int err = GLES20.glGetError(); loopCnt < 32 && err != GLES20.GL_FALSE; err = GLES20.glGetError(), ++loopCnt) {
             String msg;
-            switch (err)
-            {
+            switch (err) {
                 case GLES20.GL_INVALID_ENUM:
-                    msg = "invalid enum"; break;
+                    msg = "invalid enum";
+                    break;
                 case GLES20.GL_INVALID_FRAMEBUFFER_OPERATION:
-                    msg = "invalid framebuffer operation"; break;
+                    msg = "invalid framebuffer operation";
+                    break;
                 case GLES20.GL_INVALID_OPERATION:
-                    msg = "invalid operation";break;
+                    msg = "invalid operation";
+                    break;
                 case GLES20.GL_INVALID_VALUE:
-                    msg = "invalid value";break;
+                    msg = "invalid value";
+                    break;
                 case GLES20.GL_OUT_OF_MEMORY:
-                    msg = "out of memory"; break;
-                default: msg = "unknown error";
+                    msg = "out of memory";
+                    break;
+                default:
+                    msg = "unknown error";
             }
             Log.e(LOG_TAG, String.format("After tag \"%s\" glGetError %s(0x%x) ", tag, msg, err));
         }
@@ -74,6 +80,23 @@ public class Common {
         return texID[0];
     }
 
+    public static int genOrLoadNormalTextureID(final IntBuffer data, final int width, final int height, final int usedTexId) {
+        int[] textures = new int[1];
+        if (usedTexId == NO_TEXTURE) {
+            GLES20.glGenTextures(1, textures, 0);
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textures[0]);
+            texParamHelper(GLES20.GL_TEXTURE_2D, GLES20.GL_LINEAR, GLES20.GL_CLAMP_TO_EDGE);
+            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, width, height, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, data);
+        } else {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, usedTexId);
+            GLES20.glTexSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, width,
+                    height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, data);
+            textures[0] = usedTexId;
+        }
+
+        return textures[0];
+    }
+
     public static int genSurfaceTextureID() {
         int[] texID = new int[1];
         GLES20.glGenTextures(1, texID, 0);
@@ -90,7 +113,7 @@ public class Common {
         int[] vertexBuffer = new int[1];
         GLES20.glGenBuffers(1, vertexBuffer, 0);
 
-        if(vertexBuffer[0] == 0) {
+        if (vertexBuffer[0] == 0) {
             Log.e(LOG_TAG, "Invalid VertexBuffer! You must call this within an OpenGL thread!");
             return 0;
         }

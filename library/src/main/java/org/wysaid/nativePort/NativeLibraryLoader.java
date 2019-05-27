@@ -6,6 +6,7 @@ package org.wysaid.nativePort;
 public class NativeLibraryLoader {
 
     public static void load() {
+        System.loadLibrary("yuv-decoder");
         System.loadLibrary("ffmpeg");
         System.loadLibrary("CGE");
         System.loadLibrary("CGEExt");

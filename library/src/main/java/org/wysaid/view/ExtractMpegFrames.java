@@ -14,28 +14,26 @@ package org.wysaid.view;/*
  * limitations under the License.
  */
 
-import android.graphics.SurfaceTexture;
 import android.media.MediaCodec;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
-import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
-import android.opengl.Matrix;
 import android.os.Environment;
-import android.support.annotation.Nullable;
 import android.util.Log;
-import android.view.Surface;
 
+import org.wysaid.common.Common;
 import org.wysaid.common.SharedContext;
 
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.FloatBuffer;
+import java.nio.IntBuffer;
 
 import javax.microedition.khronos.egl.EGLContext;
+
+import static java.lang.Thread.sleep;
+import static org.wysaid.common.Common.NO_TEXTURE;
 
 /**
  * Extract frames from an MP4 using MediaExtractor, MediaCodec, and GLES.  Put a .mp4 file
@@ -46,35 +44,32 @@ import javax.microedition.khronos.egl.EGLContext;
  * (This was derived from bits and pieces of CTS tests, and is packaged as such, but is not
  * currently part of CTS.)
  */
-public class ExtractMpegFrames {
+class ExtractMpegFrames {
     private static final String TAG = "ExtractMpegFrames";
     private static final boolean VERBOSE = true;           // lots of logging
+    static volatile int sBlendTextureId = NO_TEXTURE;
 
     // where to find files (note: requires WRITE_EXTERNAL_STORAGE permission)
     private static final File FILES_DIR = Environment.getExternalStorageDirectory();
     private static final String INPUT_FILE = "source.mp4";
 
     private MediaCodec decoder;
-    private CodecOutputSurface outputSurface;
     private MediaExtractor extractor;
     private MediaFormat format;
-    private int trackIndex;
     private EGLContext rootContext;
+    private SharedContext localSharedContext;
+    private int trackIndex;
+    private int mWidth;
+    private int mHeight;
 
-    private int saveWidth = 640;
-    private int saveHeight = 480;
-    private int rotation = 0;
+    private IntBuffer mGLRgbBuffer;
 
-    private int mBlendTextureId;
-
-    /** test entry point */
-    void testExtractMpegFrames() throws Throwable {
+    void startExtractMpegFrames() throws Throwable {
         ExtractMpegFramesWrapper.runTest(this);
     }
 
-    void prepare(EGLContext rootContext, int blendTextureId) {
+    void prepare(EGLContext rootContext) {
         this.rootContext = rootContext;
-        this.mBlendTextureId = blendTextureId;
 
         try {
             File inputFile = new File(FILES_DIR, INPUT_FILE);   // must be an absolute path
@@ -90,20 +85,13 @@ public class ExtractMpegFrames {
             if (trackIndex < 0) {
                 throw new RuntimeException("No video track found in " + inputFile);
             }
+
             extractor.selectTrack(trackIndex);
 
             format = extractor.getTrackFormat(trackIndex);
-            if (VERBOSE) {
-                Log.d(TAG, "Video size is " + format.getInteger(MediaFormat.KEY_WIDTH) + "x" +
-                        format.getInteger(MediaFormat.KEY_HEIGHT));
-            }
+            mWidth = format.getInteger(MediaFormat.KEY_WIDTH);
+            mHeight = format.getInteger(MediaFormat.KEY_HEIGHT);
 
-            // Could use width/height from the MediaFormat to get full-size frames.
-            final String KEY_ROTATION = "rotation-degrees";
-
-            if (format.containsKey(KEY_ROTATION)) {
-                rotation = format.getInteger(KEY_ROTATION);
-            }
         } catch (IOException e) {
             Log.e(TAG, "failed prepare", e);
         }
@@ -113,7 +101,7 @@ public class ExtractMpegFrames {
      * Wraps extractMpegFrames().  This is necessary because SurfaceTexture will try to use
      * the looper in the current thread if one exists, and the CTS tests create one on the
      * test thread.
-     *
+     * <p>
      * The wrapper propagates exceptions thrown by the worker thread back to the caller.
      */
     private static class ExtractMpegFramesWrapper implements Runnable {
@@ -133,8 +121,10 @@ public class ExtractMpegFrames {
             }
         }
 
-        /** Entry point. */
-        public static void runTest(ExtractMpegFrames obj) throws Throwable {
+        /**
+         * Entry point.
+         */
+        static void runTest(ExtractMpegFrames obj) throws Throwable {
             ExtractMpegFramesWrapper wrapper = new ExtractMpegFramesWrapper(obj);
             Thread th = new Thread(wrapper, "codec test");
             th.start();
@@ -153,23 +143,19 @@ public class ExtractMpegFrames {
      * you're extracting frames you don't want black bars.
      */
     private void extractMpegFrames() throws IOException {
-        outputSurface = new CodecOutputSurface(saveWidth, saveHeight, rotation);
+        localSharedContext = SharedContext.create(rootContext, mWidth, mHeight);
 
         // Create a MediaCodec decoder, and configure it with the MediaFormat from the
         // extractor.  It's very important to use the format from the extractor because
         // it contains a copy of the CSD-0/CSD-1 codec-specific data chunks.
         String mime = format.getString(MediaFormat.KEY_MIME);
         decoder = MediaCodec.createDecoderByType(mime);
-        decoder.configure(format, outputSurface.getSurface(), null, 0);
+        decoder.configure(format, null, null, 0);
         decoder.start();
 
-        doExtract(extractor, trackIndex, decoder, outputSurface);
+        doExtract(extractor, trackIndex, decoder);
 
         // release everything we grabbed
-        if (outputSurface != null) {
-            outputSurface.release();
-        }
-
         if (decoder != null) {
             decoder.stop();
             decoder.release();
@@ -178,6 +164,13 @@ public class ExtractMpegFrames {
         if (extractor != null) {
             extractor.release();
         }
+
+        if (sBlendTextureId != Common.NO_TEXTURE) {
+            GLES20.glDeleteTextures(1, new int[]{sBlendTextureId}, 0);
+            sBlendTextureId = Common.NO_TEXTURE;
+        }
+
+        localSharedContext.release();
     }
 
     /**
@@ -205,21 +198,23 @@ public class ExtractMpegFrames {
     /**
      * Work loop.
      */
-    public void doExtract(MediaExtractor extractor, int trackIndex, MediaCodec decoder, CodecOutputSurface outputSurface) {
+    private void doExtract(MediaExtractor extractor, int trackIndex, MediaCodec decoder) {
 
         final int TIMEOUT_USEC = 10000;
         ByteBuffer[] decoderInputBuffers = decoder.getInputBuffers();
+        ByteBuffer[] outputBuffers = decoder.getOutputBuffers();
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
         int inputChunk = 0;
-        int decodeCount = 0;
-
         boolean outputDone = false;
         boolean inputDone = false;
+        long startMs = System.currentTimeMillis();
+
         while (!outputDone) {
             if (VERBOSE) Log.d(TAG, "loop");
 
             // Feed more data to the decoder.
             if (!inputDone) {
+
                 int inputBufIndex = decoder.dequeueInputBuffer(TIMEOUT_USEC);
                 if (inputBufIndex >= 0) {
                     ByteBuffer inputBuf = decoderInputBuffers[inputBufIndex];
@@ -228,25 +223,26 @@ public class ExtractMpegFrames {
                     int chunkSize = extractor.readSampleData(inputBuf, 0);
                     if (chunkSize < 0) {
                         // End of stream -- send empty frame with EOS flag set.
-                        decoder.queueInputBuffer(inputBufIndex, 0, 0, 0L,
-                                MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                        decoder.queueInputBuffer(inputBufIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
                         inputDone = true;
+
                         if (VERBOSE) Log.d(TAG, "sent input EOS");
+
                     } else {
+
                         if (extractor.getSampleTrackIndex() != trackIndex) {
-                            Log.w(TAG, "WEIRD: got sample from track " +
-                                    extractor.getSampleTrackIndex() + ", expected " + trackIndex);
+                            Log.w(TAG, "WEIRD: got sample from track " + extractor.getSampleTrackIndex() + ", expected " + trackIndex);
                         }
+
                         long presentationTimeUs = extractor.getSampleTime();
-                        decoder.queueInputBuffer(inputBufIndex, 0, chunkSize,
-                                presentationTimeUs, 0);
-                        if (VERBOSE) {
-                            Log.d(TAG, "submitted frame " + inputChunk + " to dec, size=" +
-                                    chunkSize);
-                        }
+                        decoder.queueInputBuffer(inputBufIndex, 0, chunkSize, presentationTimeUs, 0);
+
+                        if (VERBOSE) Log.d(TAG, "submitted frame " + inputChunk + " to dec, size=" + chunkSize);
+
                         inputChunk++;
                         extractor.advance();
                     }
+
                 } else {
                     if (VERBOSE) Log.d(TAG, "input buffer not available");
                 }
@@ -256,434 +252,59 @@ public class ExtractMpegFrames {
             if (decoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
                 // no output available yet
                 if (VERBOSE) Log.d(TAG, "no output from decoder available");
+
             } else if (decoderStatus == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
-                // not important for us, since we're using Surface
+
                 if (VERBOSE) Log.d(TAG, "decoder output buffers changed");
+                outputBuffers = decoder.getOutputBuffers();
+
             } else if (decoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 MediaFormat newFormat = decoder.getOutputFormat();
                 if (VERBOSE) Log.d(TAG, "decoder output format changed: " + newFormat);
+
             } else if (decoderStatus < 0) {
                 throw new IllegalStateException("unexpected result from decoder.dequeueOutputBuffer: " + decoderStatus);
             } else { // decoderStatus >= 0
-                if (VERBOSE) Log.d(TAG, "surface decoder given buffer " + decoderStatus +
-                        " (size=" + info.size + ")");
+
+                if (VERBOSE) Log.d(TAG, "decoder given buffer " + decoderStatus + " (size=" + info.size + ")");
+
+                // All decoded frames have been rendered, we can stop playing now
                 if ((info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                     if (VERBOSE) Log.d(TAG, "output EOS");
                     outputDone = true;
                 }
 
-                boolean doRender = (info.size != 0);
+                ByteBuffer buffer = outputBuffers[decoderStatus];
+                buffer.position(info.offset);
+                buffer.limit(info.offset + info.size);
 
-                // As soon as we call releaseOutputBuffer, the buffer will be forwarded
-                // to SurfaceTexture to convert to a texture.  The API doesn't guarantee
-                // that the texture will be available before the call returns, so we
-                // need to wait for the onFrameAvailable callback to fire.
-                decoder.releaseOutputBuffer(decoderStatus, doRender);
-                if (doRender) {
-                    if (VERBOSE) Log.d(TAG, "awaiting decode of frame " + decodeCount);
-                    outputSurface.awaitNewImage();
-                    //outputSurface.drawImage();
+                Log.d(TAG, "offset: " + info.offset + " size: " + info.size);
 
+                final byte[] ba = new byte[buffer.remaining()];
+                buffer.get(ba);
+
+                if (mGLRgbBuffer == null) {
+                    mGLRgbBuffer = IntBuffer.allocate(mHeight * mWidth);
+                }
+
+                YUVtoRBGA(ba, mWidth, mHeight, mGLRgbBuffer.array());
+                sBlendTextureId = Common.genOrLoadNormalTextureID(mGLRgbBuffer, mWidth, mHeight, sBlendTextureId);
+
+                // We use a very simple clock to keep the video FPS, or the video
+                // playback will be too fast
+                while (info.presentationTimeUs / 1000 > System.currentTimeMillis() - startMs) {
                     try {
-                        Thread.sleep(100L);
+                        sleep(600);
                     } catch (InterruptedException e) {
                         e.printStackTrace();
-                    }
-                    decodeCount++;
-                }
-            }
-        }
-    }
-
-    /**
-     * Holds state associated with a Surface used for MediaCodec decoder output.
-     * <p>
-     * The constructor for this class will prepare GL, create a SurfaceTexture,
-     * and then create a Surface for that SurfaceTexture.  The Surface can be passed to
-     * MediaCodec.configure() to receive decoder output.  When a frame arrives, we latch the
-     * texture with updateTexImage(), then render the texture with GL to a pbuffer.
-     * <p>
-     * By default, the Surface will be using a BufferQueue in asynchronous mode, so we
-     * can potentially drop frames.
-     */
-    private class CodecOutputSurface implements SurfaceTexture.OnFrameAvailableListener {
-
-        //private ExtractMpegFrames.STextureRender mTextureRender;
-        private SurfaceTexture mSurfaceTexture;
-        private Surface mSurface;
-        private SharedContext localSharedContext;
-        int mWidth;
-        int mHeight;
-
-        private final Object mFrameSyncObject = new Object();     // guards mFrameAvailable
-        private boolean mFrameAvailable;
-        private int mRotation;
-
-        /**
-         * Creates a CodecOutputSurface backed by a pbuffer with the specified dimensions.  The
-         * new EGL context and surface will be made current.  Creates a Surface that can be passed
-         * to MediaCodec.configure().
-         */
-        public CodecOutputSurface(int width, int height, int rotation) {
-            if (width <= 0 || height <= 0) {
-                throw new IllegalArgumentException();
-            }
-            mWidth = width;
-            mHeight = height;
-            mRotation = rotation;
-
-            eglSetup();
-           // makeCurrent();
-            setup();
-        }
-
-        /*public int getTextureId() {
-            return mTextureRender.mTextureID;
-        }*/
-
-        /**
-         * Creates interconnected instances of TextureRender, SurfaceTexture, and Surface.
-         */
-        private void setup() {
-            //mTextureRender = new ExtractMpegFrames.STextureRender();
-            //mTextureRender.surfaceCreated();
-
-            if (VERBOSE) Log.d(TAG, "textureID=" + mBlendTextureId);
-            mSurfaceTexture = new SurfaceTexture(mBlendTextureId);
-
-            // This doesn't work if this object is created on the thread that CTS started for
-            // these test cases.
-            //
-            // The CTS-created thread has a Looper, and the SurfaceTexture constructor will
-            // create a Handler that uses it.  The "frame available" message is delivered
-            // there, but since we're not a Looper-based thread we'll never see it.  For
-            // this to do anything useful, CodecOutputSurface must be created on a thread without
-            // a Looper, so that SurfaceTexture uses the main application Looper instead.
-            //
-            // Java language note: passing "this" out of a constructor is generally unwise,
-            // but we should be able to get away with it here.
-            mSurfaceTexture.setOnFrameAvailableListener(this);
-
-            mSurface = new Surface(mSurfaceTexture);
-        }
-
-        /**
-         * Prepares EGL.  We want a GLES 2.0 context and a surface that supports pbuffer.
-         */
-        private void eglSetup() {
-            localSharedContext = SharedContext.create(rootContext, mWidth, mHeight);
-
-            if (localSharedContext  == null) {
-                throw new RuntimeException("null local context");
-            }
-        }
-
-        /**
-         * Discard all resources held by this class, notably the EGL context.
-         */
-        public void release() {
-            localSharedContext.release();
-            mSurface.release();
-
-            // this causes a bunch of warnings that appear harmless but might confuse someone:
-            //  W BufferQueue: [unnamed-3997-2] cancelBuffer: BufferQueue has been abandoned!
-            //mSurfaceTexture.release();
-
-            //mTextureRender = null;
-            mSurface = null;
-            mSurfaceTexture = null;
-        }
-
-        /**
-         * Makes our EGL context and surface current.
-         */
-        void makeCurrent() {
-            localSharedContext.makeCurrent();
-        }
-
-        /**
-         * Returns the Surface.
-         */
-        public Surface getSurface() {
-            return mSurface;
-        }
-
-        /**
-         * Latches the next buffer into the texture.  Must be called from the thread that created
-         * the CodecOutputSurface object.  (More specifically, it must be called on the thread
-         * with the EGLContext that contains the GL texture object used by SurfaceTexture.)
-         */
-        public void awaitNewImage() {
-            final int TIMEOUT_MS = 2500;
-
-            synchronized (mFrameSyncObject) {
-                while (!mFrameAvailable) {
-                    try {
-                        // Wait for onFrameAvailable() to signal us.  Use a timeout to avoid
-                        // stalling the test if it doesn't arrive.
-                        mFrameSyncObject.wait(TIMEOUT_MS);
-                        if (!mFrameAvailable) {
-                            // TODO: if "spurious wakeup", continue while loop
-                            throw new RuntimeException("frame wait timed out");
-                        }
-                    } catch (InterruptedException ie) {
-                        // shouldn't happen
-                        throw new RuntimeException(ie);
+                        break;
                     }
                 }
-                mFrameAvailable = false;
-            }
 
-            // Latch the data.
-            //mTextureRender.checkGlError("before updateTexImage");
-
-            if (VERBOSE) Log.d(TAG, "awaitNewImage::updating tex image");
-            mSurfaceTexture.updateTexImage();
-        }
-
-        /**
-         * Draws the data from SurfaceTexture onto the current EGL surface.
-         */
-        /*public void drawImage() {
-            mTextureRender.drawFrame(mSurfaceTexture, mRotation);
-        }*/
-
-        // SurfaceTexture callback
-        @Override
-        public void onFrameAvailable(SurfaceTexture st) {
-            if (VERBOSE) Log.d(TAG, "new frame available");
-            synchronized (mFrameSyncObject) {
-                if (mFrameAvailable) {
-                    throw new RuntimeException("mFrameAvailable already set, frame could be dropped");
-                }
-                mFrameAvailable = true;
-                mFrameSyncObject.notifyAll();
+                decoder.releaseOutputBuffer(decoderStatus, false);
             }
         }
     }
 
-    /**
-     * Code for rendering a texture onto a surface using OpenGL ES 2.0.
-     */
-    private static class STextureRender {
-        private static final int FLOAT_SIZE_BYTES = 4;
-        private static final int TRIANGLE_VERTICES_DATA_STRIDE_BYTES = 5 * FLOAT_SIZE_BYTES;
-        private static final int TRIANGLE_VERTICES_DATA_POS_OFFSET = 0;
-        private static final int TRIANGLE_VERTICES_DATA_UV_OFFSET = 3;
-        private final float[] mTriangleVerticesData = {
-                // X, Y, Z, U, V
-                -1.0f, -1.0f, 0, 0.f, 0.f,
-                 1.0f, -1.0f, 0, 1.f, 0.f,
-                -1.0f,  1.0f, 0, 0.f, 1.f,
-                 1.0f,  1.0f, 0, 1.f, 1.f,
-        };
-
-        private FloatBuffer mTriangleVertices;
-
-        private static final String VERTEX_SHADER =
-                "uniform mat4 uMVPMatrix;\n" +
-                "uniform mat4 uSTMatrix;\n" +
-                "attribute vec4 aPosition;\n" +
-                "attribute vec4 aTextureCoord;\n" +
-                "varying vec2 vTextureCoord;\n" +
-                "void main() {\n" +
-                "    gl_Position = uMVPMatrix * aPosition;\n" +
-                "    vTextureCoord = (uSTMatrix * aTextureCoord).xy;\n" +
-                "}\n";
-
-        private static final String FRAGMENT_SHADER =
-                "#extension GL_OES_EGL_image_external : require\n" +
-                "precision mediump float;\n" +      // highp here doesn't seem to matter
-                "varying vec2 vTextureCoord;\n" +
-                "uniform samplerExternalOES sTexture;\n" +
-                "void main() {\n" +
-                "    gl_FragColor = texture2D(sTexture, vTextureCoord);\n" +
-                "}\n";
-
-        private float[] mMVPMatrix = new float[16];
-        private float[] mSTMatrix = new float[16];
-
-        private int mProgram;
-        private int mTextureID = -12345;
-        private int muMVPMatrixHandle;
-        private int muSTMatrixHandle;
-        private int maPositionHandle;
-        private int maTextureHandle;
-
-        public STextureRender() {
-            mTriangleVertices = ByteBuffer.allocateDirect(
-                    mTriangleVerticesData.length * FLOAT_SIZE_BYTES)
-                    .order(ByteOrder.nativeOrder()).asFloatBuffer();
-            mTriangleVertices.put(mTriangleVerticesData).position(0);
-
-            Matrix.setIdentityM(mSTMatrix, 0);
-        }
-
-        /**
-         * Draws the external texture in SurfaceTexture onto the current EGL surface.
-         */
-        public void drawFrame(SurfaceTexture st, int rotation) {
-            checkGlError("onDrawFrame start");
-            st.getTransformMatrix(mSTMatrix);
-            if (0 == rotation) {
-                mSTMatrix[5] = -mSTMatrix[5];
-                mSTMatrix[13] = 1.0f - mSTMatrix[13];
-            } else if (270 == rotation) {
-                mSTMatrix[4] = -mSTMatrix[4];
-                mSTMatrix[12] = 1.0f - mSTMatrix[12];
-            } else if (90 == rotation) {
-                //Matrix.scaleM(mSTMatrix, 0, 1, -1f, 1);
-                //Matrix.translateM(mSTMatrix, 0, 0, -1, 0);
-                mSTMatrix[4] = -mSTMatrix[4];
-                mSTMatrix[12] = 1.0f - mSTMatrix[12];
-            } else {
-                mSTMatrix[5] = -mSTMatrix[5];
-                mSTMatrix[13] = 1.0f - mSTMatrix[13];
-            }
-
-            // (optional) clear to green so we can see if we're failing to set pixels
-            GLES20.glClearColor(0.0f, 1.0f, 0.0f, 1.0f);
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-
-            GLES20.glUseProgram(mProgram);
-            checkGlError("glUseProgram");
-
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, mTextureID);
-
-            mTriangleVertices.position(TRIANGLE_VERTICES_DATA_POS_OFFSET);
-            GLES20.glVertexAttribPointer(maPositionHandle, 3, GLES20.GL_FLOAT, false,
-                    TRIANGLE_VERTICES_DATA_STRIDE_BYTES, mTriangleVertices);
-            checkGlError("glVertexAttribPointer maPosition");
-            GLES20.glEnableVertexAttribArray(maPositionHandle);
-            checkGlError("glEnableVertexAttribArray maPositionHandle");
-
-            mTriangleVertices.position(TRIANGLE_VERTICES_DATA_UV_OFFSET);
-            GLES20.glVertexAttribPointer(maTextureHandle, 2, GLES20.GL_FLOAT, false,
-                    TRIANGLE_VERTICES_DATA_STRIDE_BYTES, mTriangleVertices);
-            checkGlError("glVertexAttribPointer maTextureHandle");
-            GLES20.glEnableVertexAttribArray(maTextureHandle);
-            checkGlError("glEnableVertexAttribArray maTextureHandle");
-
-            Matrix.setIdentityM(mMVPMatrix, 0);
-            GLES20.glUniformMatrix4fv(muMVPMatrixHandle, 1, false, mMVPMatrix, 0);
-            GLES20.glUniformMatrix4fv(muSTMatrixHandle, 1, false, mSTMatrix, 0);
-
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-            checkGlError("glDrawArrays");
-
-            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0);
-        }
-
-        /**
-         * Initializes GL state.  Call this after the EGL surface has been created and made current.
-         */
-        public void surfaceCreated() {
-            mProgram = createProgram(VERTEX_SHADER, FRAGMENT_SHADER);
-            if (mProgram == 0) {
-                throw new RuntimeException("failed creating program");
-            }
-
-            maPositionHandle = GLES20.glGetAttribLocation(mProgram, "aPosition");
-            checkLocation(maPositionHandle, "aPosition");
-            maTextureHandle = GLES20.glGetAttribLocation(mProgram, "aTextureCoord");
-            checkLocation(maTextureHandle, "aTextureCoord");
-
-            muMVPMatrixHandle = GLES20.glGetUniformLocation(mProgram, "uMVPMatrix");
-            checkLocation(muMVPMatrixHandle, "uMVPMatrix");
-            muSTMatrixHandle = GLES20.glGetUniformLocation(mProgram, "uSTMatrix");
-            checkLocation(muSTMatrixHandle, "uSTMatrix");
-
-            int[] textures = new int[1];
-            GLES20.glGenTextures(1, textures, 0);
-
-            mTextureID = textures[0];
-            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, mTextureID);
-            checkGlError("glBindTexture mTextureID");
-
-            GLES20.glTexParameterf(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER,
-                    GLES20.GL_NEAREST);
-            GLES20.glTexParameterf(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER,
-                    GLES20.GL_LINEAR);
-            GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S,
-                    GLES20.GL_CLAMP_TO_EDGE);
-            GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T,
-                    GLES20.GL_CLAMP_TO_EDGE);
-            checkGlError("glTexParameter");
-        }
-
-        /**
-         * Replaces the fragment shader.  Pass in null to reset to default.
-         */
-        public void changeFragmentShader(String fragmentShader) {
-            if (fragmentShader == null) {
-                fragmentShader = FRAGMENT_SHADER;
-            }
-            GLES20.glDeleteProgram(mProgram);
-            mProgram = createProgram(VERTEX_SHADER, fragmentShader);
-            if (mProgram == 0) {
-                throw new RuntimeException("failed creating program");
-            }
-        }
-
-        private int loadShader(int shaderType, String source) {
-            int shader = GLES20.glCreateShader(shaderType);
-            checkGlError("glCreateShader type=" + shaderType);
-            GLES20.glShaderSource(shader, source);
-            GLES20.glCompileShader(shader);
-            int[] compiled = new int[1];
-            GLES20.glGetShaderiv(shader, GLES20.GL_COMPILE_STATUS, compiled, 0);
-            if (compiled[0] == 0) {
-                Log.e(TAG, "Could not compile shader " + shaderType + ":");
-                Log.e(TAG, " " + GLES20.glGetShaderInfoLog(shader));
-                GLES20.glDeleteShader(shader);
-                shader = 0;
-            }
-            return shader;
-        }
-
-        private int createProgram(String vertexSource, String fragmentSource) {
-            int vertexShader = loadShader(GLES20.GL_VERTEX_SHADER, vertexSource);
-            if (vertexShader == 0) {
-                return 0;
-            }
-            int pixelShader = loadShader(GLES20.GL_FRAGMENT_SHADER, fragmentSource);
-            if (pixelShader == 0) {
-                return 0;
-            }
-
-            int program = GLES20.glCreateProgram();
-            if (program == 0) {
-                Log.e(TAG, "Could not create program");
-            }
-            GLES20.glAttachShader(program, vertexShader);
-            checkGlError("glAttachShader");
-            GLES20.glAttachShader(program, pixelShader);
-            checkGlError("glAttachShader");
-            GLES20.glLinkProgram(program);
-            int[] linkStatus = new int[1];
-            GLES20.glGetProgramiv(program, GLES20.GL_LINK_STATUS, linkStatus, 0);
-            if (linkStatus[0] != GLES20.GL_TRUE) {
-                Log.e(TAG, "Could not link program: ");
-                Log.e(TAG, GLES20.glGetProgramInfoLog(program));
-                GLES20.glDeleteProgram(program);
-                program = 0;
-            }
-            return program;
-        }
-
-        public void checkGlError(String op) {
-            int error;
-            while ((error = GLES20.glGetError()) != GLES20.GL_NO_ERROR) {
-                Log.e(TAG, op + ": glError " + error);
-                throw new RuntimeException(op + ": glError " + error);
-            }
-        }
-
-        public static void checkLocation(int location, String label) {
-            if (location < 0) {
-                throw new RuntimeException("Unable to locate '" + label + "' in program");
-            }
-        }
-    }
+    public static native void YUVtoRBGA(byte[] yuv, int width, int height, int[] out);
 }

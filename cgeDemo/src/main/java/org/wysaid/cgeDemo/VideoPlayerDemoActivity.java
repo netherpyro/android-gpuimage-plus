@@ -23,6 +23,8 @@ import org.wysaid.myUtils.MsgUtil;
 import org.wysaid.nativePort.CGEFrameRenderer;
 import org.wysaid.view.VideoPlayerGLSurfaceView;
 
+import java.util.Locale;
+
 public class VideoPlayerDemoActivity extends AppCompatActivity {
 
     VideoPlayerGLSurfaceView mPlayerView;
@@ -43,12 +45,12 @@ public class VideoPlayerDemoActivity extends AppCompatActivity {
 
         @Override
         public boolean playFailed(MediaPlayer player, final int what, final int extra) {
-            MsgUtil.toastMsg(VideoPlayerDemoActivity.this, String.format("Error occured! Stop playing, Err code: %d, %d", what, extra));
+            MsgUtil.toastMsg(VideoPlayerDemoActivity.this, String.format(Locale.getDefault(), "Error occured! Stop playing, Err code: %d, %d", what, extra));
             return true;
         }
     };
 
-    class MyVideoButton extends Button implements View.OnClickListener {
+    class MyVideoButton extends android.support.v7.widget.AppCompatButton implements View.OnClickListener {
 
         Uri videoUri;
         VideoPlayerGLSurfaceView videoView;

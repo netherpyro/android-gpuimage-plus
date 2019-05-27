@@ -9,7 +9,6 @@ import android.graphics.SurfaceTexture;
 import android.media.MediaPlayer;
 import android.net.Uri;
 import android.opengl.GLES20;
-import android.opengl.GLES30;
 import android.opengl.GLSurfaceView;
 import android.util.AttributeSet;
 import android.util.Log;
@@ -36,13 +35,12 @@ import javax.microedition.khronos.opengles.GL10;
 public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurfaceView.Renderer, SurfaceTexture.OnFrameAvailableListener,
         GLSurfaceView.EGLContextFactory, GLSurfaceView.EGLWindowSurfaceFactory {
 
-    public static final String LOG_TAG = Common.LOG_TAG;
+    public static final String LOG_TAG = "VideoPlayerGLSurfView";
 
     private SharedContext rootSharedContext;
 
     private SurfaceTexture mSurfaceTexture;
     private int mVideoTextureID;
-    private int mBlendTextureID;
     private CGEFrameRenderer mFrameRenderer;
     private ExtractMpegFrames extractMpegFrames = new ExtractMpegFrames();
 
@@ -67,8 +65,8 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
         return mViewHeight;
     }
 
-    private int mVideoWidth = 1000;
-    private int mVideoHeight = 1000;
+    private int mVideoWidth = 480;
+    private int mVideoHeight = 360;
 
     private boolean mFitFullView = false;
 
@@ -161,7 +159,6 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
 
                     if (mSurfaceTexture == null || mVideoTextureID == 0) {
                         mVideoTextureID = Common.genSurfaceTextureID();
-                        mBlendTextureID = Common.genSurfaceTextureID();
                         mSurfaceTexture = new SurfaceTexture(mVideoTextureID);
                         mSurfaceTexture.setOnFrameAvailableListener(VideoPlayerGLSurfaceView.this);
                     }
@@ -177,6 +174,10 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
             public void run() {
 
                 if (mFrameRenderer != null) {
+                    if (ExtractMpegFrames.sBlendTextureId != Common.NO_TEXTURE) {
+                        blendConfig = "@blend sr [" + ExtractMpegFrames.sBlendTextureId + "," + mVideoWidth + "," + mVideoHeight + "] 100";
+                    }
+
                     String applyConfig = blendConfig != null ? blendConfig : config;
 
                     Log.d(LOG_TAG, "use filter config: " + applyConfig);
@@ -309,10 +310,10 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
 
         if (mVideoUri != null && (mSurfaceTexture == null || mVideoTextureID == 0)) {
             mVideoTextureID = Common.genSurfaceTextureID();
-            mBlendTextureID = Common.genSurfaceTextureID();
             mSurfaceTexture = new SurfaceTexture(mVideoTextureID);
             mSurfaceTexture.setOnFrameAvailableListener(VideoPlayerGLSurfaceView.this);
-            extractMpegFrames.prepare(rootSharedContext.getContext(), mBlendTextureID);
+            extractMpegFrames.prepare(rootSharedContext.getContext());
+
             _useUri();
         }
     }
@@ -361,11 +362,6 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
                     if (mVideoTextureID != 0) {
                         GLES20.glDeleteTextures(1, new int[]{mVideoTextureID}, 0);
                         mVideoTextureID = 0;
-                    }
-
-                    if (mBlendTextureID != 0) {
-                        GLES20.glDeleteTextures(1, new int[]{mBlendTextureID}, 0);
-                        mBlendTextureID = 0;
                     }
 
                     mIsUsingMask = false;
@@ -545,10 +541,6 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
                             Log.e(LOG_TAG, "Frame Recorder init failed!");
                         }
 
-                        if (mBlendTextureID != 0) {
-                            blendConfig = "@blend sr [" + mBlendTextureID + "," + mVideoWidth + "," + mVideoHeight + "] 100";
-                        }
-
                         calcViewport();
                     }
                 });
@@ -560,9 +552,9 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
                 }
 
                 try {
-                    extractMpegFrames.testExtractMpegFrames();
+                    extractMpegFrames.startExtractMpegFrames();
                 } catch (Throwable throwable) {
-                    Log.e(LOG_TAG, "testExtractMpegFrames failed!", throwable);
+                    Log.e(LOG_TAG, "startExtractMpegFrames failed!", throwable);
                 }
                 Log.i(LOG_TAG, String.format("Video resolution 1: %d x %d", mVideoWidth, mVideoHeight));
             }
