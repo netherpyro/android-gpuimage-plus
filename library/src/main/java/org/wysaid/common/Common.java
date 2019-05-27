@@ -62,8 +62,8 @@ public class Common {
         int[] texID = new int[1];
         GLES20.glGenTextures(1, texID, 0);
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texID[0]);
-        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, width, height, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null);
         texParamHelper(GLES20.GL_TEXTURE_2D, filter, wrap);
+        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, width, height, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null);
         return texID[0];
     }
 
@@ -95,6 +95,12 @@ public class Common {
         }
 
         return textures[0];
+    }
+
+    public static void loadNormalTextureID(final IntBuffer data, final int width, final int height, final int usedTexId) {
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, usedTexId);
+        GLES20.glTexSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, width,
+                height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, data);
     }
 
     public static int genSurfaceTextureID() {

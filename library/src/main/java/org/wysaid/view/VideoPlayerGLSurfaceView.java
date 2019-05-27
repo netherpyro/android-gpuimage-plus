@@ -42,7 +42,10 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
     private SurfaceTexture mSurfaceTexture;
     private int mVideoTextureID;
     private CGEFrameRenderer mFrameRenderer;
-    private ExtractMpegFrames extractMpegFrames = new ExtractMpegFrames();
+    private ExtractMpegFrames extractMpegFrames1 = new ExtractMpegFrames();
+    private ExtractMpegFrames extractMpegFrames2 = new ExtractMpegFrames();
+    private ExtractMpegFrames extractMpegFrames3 = new ExtractMpegFrames();
+    private int[] blendTexIDs = new int[]{Common.NO_TEXTURE, Common.NO_TEXTURE, Common.NO_TEXTURE};
 
     private TextureRenderer.Viewport mRenderViewport = new TextureRenderer.Viewport();
     private float[] mTransformMatrix = new float[16];
@@ -174,11 +177,25 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
             public void run() {
 
                 if (mFrameRenderer != null) {
-                    if (ExtractMpegFrames.sBlendTextureId != Common.NO_TEXTURE) {
-                        blendConfig = "@blend sr [" + ExtractMpegFrames.sBlendTextureId + "," + mVideoWidth + "," + mVideoHeight + "] 100";
-                    }
+                    StringBuilder sb = new StringBuilder();
 
-                    String applyConfig = blendConfig != null ? blendConfig : config;
+                    if (blendTexIDs[0] != Common.NO_TEXTURE) {
+                        sb.append("@blend sr [").append(blendTexIDs[0]).append(",").append(mVideoWidth).append(",").append(mVideoHeight).append("] 100");
+                    }
+                    sb.append(" ");
+                    if (blendTexIDs[1] != Common.NO_TEXTURE) {
+                        sb.append("@blend sr [").append(blendTexIDs[1]).append(",").append(mVideoWidth).append(",").append(mVideoHeight).append("] 100");
+                    }
+                    sb.append(" ");
+                    if (blendTexIDs[2] != Common.NO_TEXTURE) {
+                        sb.append("@blend sr [").append(blendTexIDs[2]).append(",").append(mVideoWidth).append(",").append(mVideoHeight).append("] 100");
+                    }
+                    sb.append(" ");
+                    sb.append("@adjust lut  04_MagicHourLookup.jpg");
+
+                    blendConfig = sb.toString();
+
+                    String applyConfig = !blendConfig.equals("") ? blendConfig : config;
 
                     Log.d(LOG_TAG, "use filter config: " + applyConfig);
 
@@ -312,7 +329,10 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
             mVideoTextureID = Common.genSurfaceTextureID();
             mSurfaceTexture = new SurfaceTexture(mVideoTextureID);
             mSurfaceTexture.setOnFrameAvailableListener(VideoPlayerGLSurfaceView.this);
-            extractMpegFrames.prepare(rootSharedContext.getContext());
+
+            blendTexIDs[0] = extractMpegFrames1.prepare(rootSharedContext.getContext(), "Flare_15.mov");
+            blendTexIDs[1] = extractMpegFrames2.prepare(rootSharedContext.getContext(), "05-FilmBurn_09.mov");
+            blendTexIDs[2] = extractMpegFrames3.prepare(rootSharedContext.getContext(), "10 Wash_06.mov");
 
             _useUri();
         }
@@ -552,7 +572,9 @@ public class VideoPlayerGLSurfaceView extends GLSurfaceView implements GLSurface
                 }
 
                 try {
-                    extractMpegFrames.startExtractMpegFrames();
+                    extractMpegFrames1.startExtractMpegFrames();
+                    extractMpegFrames2.startExtractMpegFrames();
+                    extractMpegFrames3.startExtractMpegFrames();
                 } catch (Throwable throwable) {
                     Log.e(LOG_TAG, "startExtractMpegFrames failed!", throwable);
                 }

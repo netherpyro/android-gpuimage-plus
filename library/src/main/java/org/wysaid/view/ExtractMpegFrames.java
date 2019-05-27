@@ -46,12 +46,7 @@ import static org.wysaid.common.Common.NO_TEXTURE;
  */
 class ExtractMpegFrames {
     private static final String TAG = "ExtractMpegFrames";
-    private static final boolean VERBOSE = true;           // lots of logging
-    static volatile int sBlendTextureId = NO_TEXTURE;
-
-    // where to find files (note: requires WRITE_EXTERNAL_STORAGE permission)
-    private static final File FILES_DIR = Environment.getExternalStorageDirectory();
-    private static final String INPUT_FILE = "source.mp4";
+    private static final boolean VERBOSE = false;           // lots of logging
 
     private MediaCodec decoder;
     private MediaExtractor extractor;
@@ -61,6 +56,7 @@ class ExtractMpegFrames {
     private int trackIndex;
     private int mWidth;
     private int mHeight;
+    private int texId = NO_TEXTURE;
 
     private IntBuffer mGLRgbBuffer;
 
@@ -68,11 +64,11 @@ class ExtractMpegFrames {
         ExtractMpegFramesWrapper.runTest(this);
     }
 
-    void prepare(EGLContext rootContext) {
+    int prepare(EGLContext rootContext, String fileName) {
         this.rootContext = rootContext;
 
         try {
-            File inputFile = new File(FILES_DIR, INPUT_FILE);   // must be an absolute path
+            File inputFile = new File(Environment.getExternalStorageDirectory(), fileName);   // must be an absolute path
             // The MediaExtractor error messages aren't very useful.  Check to see if the input
             // file exists so we can throw a better one if it's not there.
             if (!inputFile.canRead()) {
@@ -91,10 +87,13 @@ class ExtractMpegFrames {
             format = extractor.getTrackFormat(trackIndex);
             mWidth = format.getInteger(MediaFormat.KEY_WIDTH);
             mHeight = format.getInteger(MediaFormat.KEY_HEIGHT);
+            texId = Common.genBlankTextureID(mWidth, mHeight);
 
         } catch (IOException e) {
             Log.e(TAG, "failed prepare", e);
         }
+
+        return texId;
     }
 
     /**
@@ -165,9 +164,9 @@ class ExtractMpegFrames {
             extractor.release();
         }
 
-        if (sBlendTextureId != Common.NO_TEXTURE) {
-            GLES20.glDeleteTextures(1, new int[]{sBlendTextureId}, 0);
-            sBlendTextureId = Common.NO_TEXTURE;
+        if (texId != Common.NO_TEXTURE) {
+            GLES20.glDeleteTextures(1, new int[]{texId}, 0);
+            texId = Common.NO_TEXTURE;
         }
 
         localSharedContext.release();
@@ -288,7 +287,7 @@ class ExtractMpegFrames {
                 }
 
                 YUVtoRBGA(ba, mWidth, mHeight, mGLRgbBuffer.array());
-                sBlendTextureId = Common.genOrLoadNormalTextureID(mGLRgbBuffer, mWidth, mHeight, sBlendTextureId);
+                Common.loadNormalTextureID(mGLRgbBuffer, mWidth, mHeight, texId);
 
                 // We use a very simple clock to keep the video FPS, or the video
                 // playback will be too fast
